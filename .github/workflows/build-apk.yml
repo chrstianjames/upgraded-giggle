@@ -51,9 +51,17 @@ jobs:
           mkdir -p "$RUNNER_TEMP/apktool-home"
           java -jar "$RUNNER_TEMP/apktool.jar" d -f -r \
             5_6181698127930598959.apk -o "$RUNNER_TEMP/decoded"
-          python3 scripts/patch_launcher.py "$RUNNER_TEMP/decoded"
-          java -jar "$RUNNER_TEMP/apktool.jar" b "$RUNNER_TEMP/decoded" \
-            -o "$RUNNER_TEMP/unsigned.apk"
+          if ! python3 scripts/patch_launcher.py "$RUNNER_TEMP/decoded" > "$RUNNER_TEMP/patch.log" 2>&1; then
+            echo "::error::$(tail -n 12 "$RUNNER_TEMP/patch.log" | tr '\n' ' ')"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/patch.log"
+          if ! java -jar "$RUNNER_TEMP/apktool.jar" b "$RUNNER_TEMP/decoded" \
+            -o "$RUNNER_TEMP/unsigned.apk" > "$RUNNER_TEMP/rebuild.log" 2>&1; then
+            echo "::error::$(tail -n 12 "$RUNNER_TEMP/rebuild.log" | tr '\n' ' ')"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/rebuild.log"
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -f -p 4 \
             "$RUNNER_TEMP/unsigned.apk" "$RUNNER_TEMP/aligned.apk"
           # Ensure the original native library is byte-for-byte unchanged.
