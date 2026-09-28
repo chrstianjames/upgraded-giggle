@@ -1,0 +1,89 @@
+name: Build login-free APK
+
+on:
+  push:
+    branches: [arena/01a0e6da-upgraded-giggle]
+    paths:
+      - '5_6181698127930598959.apk'
+      - 'scripts/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install build tools
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Get verified apktool
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/apktool.jar" \
+            https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
+          echo 'dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423  '"$RUNNER_TEMP/apktool.jar" | sha256sum -c -
+      - name: Test patcher
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Decode, remove login launch, rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/apktool-home"
+          java -jar "$RUNNER_TEMP/apktool.jar" d -f -r \
+            5_6181698127930598959.apk -o "$RUNNER_TEMP/decoded"
+          python3 scripts/patch_launcher.py "$RUNNER_TEMP/decoded"
+          java -jar "$RUNNER_TEMP/apktool.jar" b "$RUNNER_TEMP/decoded" \
+            -o "$RUNNER_TEMP/unsigned.apk"
+          "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -f -p 4 \
+            "$RUNNER_TEMP/unsigned.apk" "$RUNNER_TEMP/aligned.apk"
+          # Ensure the original native library is byte-for-byte unchanged.
+          cmp <(unzip -p 5_6181698127930598959.apk lib/arm64-v8a/libPrimeBit.so) \
+              <(unzip -p "$RUNNER_TEMP/aligned.apk" lib/arm64-v8a/libPrimeBit.so)
+      - name: Sign APK (bring your own keystore for stable updates)
+        shell: bash
+        env:
+          APK_KEYSTORE_BASE64: ${{ secrets.APK_KEYSTORE_BASE64 }}
+          APK_KEYSTORE_PASSWORD: ${{ secrets.APK_KEYSTORE_PASSWORD }}
+          APK_KEY_ALIAS: ${{ secrets.APK_KEY_ALIAS }}
+          APK_KEY_PASSWORD: ${{ secrets.APK_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$APK_KEYSTORE_BASE64" ]]; then
+            : "${APK_KEYSTORE_PASSWORD:?Set APK_KEYSTORE_PASSWORD}"
+            : "${APK_KEY_ALIAS:?Set APK_KEY_ALIAS}"
+            : "${APK_KEY_PASSWORD:?Set APK_KEY_PASSWORD}"
+            printf '%s' "$APK_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing.jks"
+          else
+            # CI demonstration key: this changes each run. Do NOT use for updates.
+            APK_KEYSTORE_PASSWORD=android
+            APK_KEY_ALIAS=preview
+            APK_KEY_PASSWORD=android
+            keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/signing.jks" \
+              -alias "$APK_KEY_ALIAS" -storepass "$APK_KEYSTORE_PASSWORD" \
+              -keypass "$APK_KEY_PASSWORD" -keyalg RSA -keysize 3072 \
+              -validity 3650 -dname 'CN=Preview build, O=Arena'
+          fi
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" sign \
+            --ks "$RUNNER_TEMP/signing.jks" \
+            --ks-key-alias "$APK_KEY_ALIAS" \
+            --ks-pass "env:APK_KEYSTORE_PASSWORD" \
+            --key-pass "env:APK_KEY_PASSWORD" \
+            --out primebit-menu-no-login.apk "$RUNNER_TEMP/aligned.apk"
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify \
+            --verbose --min-sdk-version 24 primebit-menu-no-login.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: primebit-menu-no-login
+          path: primebit-menu-no-login.apk
+          if-no-files-found: error
+          retention-days: 14
