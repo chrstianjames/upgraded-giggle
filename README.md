@@ -10,7 +10,7 @@ This repository was provided **only as a compiled APK**, not an Android Studio/G
 
 ## Build
 
-[Actions → Build login-free APK](../../actions/workflows/build-apk.yml) runs automatically on pushes to this workspace branch, or can be run manually when available. Download the `primebit-menu-no-login` artifact (APK) from the workflow run. The workflow pins and verifies apktool 3.0.3, decodes the supplied APK with binary resources preserved, applies `scripts/patch_launcher.py`, rebuilds, aligns, signs, and verifies the APK. It checks the native library was not modified.
+[Actions → Build login-free APK](../../actions/workflows/build-apk.yml) runs automatically on source changes to this workspace branch, or can be run manually when available. Download the `primebit-menu-no-login` artifact (APK) from the workflow run, or get the latest build at [`artifacts/primebit-menu-no-login.apk`](artifacts/primebit-menu-no-login.apk). The workflow pins and verifies apktool 3.0.3, decodes the supplied APK with binary resources preserved, applies `scripts/patch_launcher.py`, rebuilds, aligns, signs, and verifies the APK. It checks the native library was not modified. The output APK is committed because the requested deliverable is a downloadable rebuilt APK; other generated files are not tracked.
 
 You can also build locally with Java 17+, Android SDK build-tools 36.0.0, and apktool 3.0.3:
 
