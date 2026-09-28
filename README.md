@@ -5,7 +5,8 @@ This repository was provided **only as a compiled APK**, not an Android Studio/G
 ## Changes
 
 - Replaces the launcher activity's `onCreate` and overlay-permission result handler at APK build time. Opening the app requests **Display over other apps** permission if needed, then starts the original floating-menu foreground service and closes the launcher. **No login UI or key entry is opened.** Tap the floating icon to open the original panel.
-- The game injection/native library is *not* altered and its signature/token checks are *not* disabled. A re-signed APK may show its original anti-tamper warning or refuse to inject. **A successful APK build does not prove the native features work.** To properly remove licensing and retain native functionality, obtain the original Android/Kotlin/C++ source and signing key and change/rebuild them together.
+- The menu had a **second lock**: `FloatingService.c()` returned *true when locked* if the login token was absent or the native certificate check failed. This build replaces that Java-side lock, substitutes a Java implementation of `KeyLoginClient.nativeVerifyApp` so the separate injection gate accepts a re-signed build, and replaces the two hostile warning strings in the menu and status refresh. The original root/ELF and deployment checks remain.
+- The arm64 native library is **not** changed. Its own game-side authentication/integrity checks may still refuse injection or other features; no fabricated auth token is supplied. **A successful APK build does not prove game features work.** For a reliable full fix, use the original Android/Kotlin/C++ source and signing key and rebuild them together.
 - No new permissions are added. Android overlay permission must be approved by the user. Some devices restrict foreground services or overlays; this has not been tested on a physical device.
 
 ## Build
@@ -26,4 +27,4 @@ zipalign -f -p 4 unsigned.apk aligned.apk
 
 The fallback CI key is generated anew for each build: **uninstall prior APKs before installing a fallback-signed build** (back up app data first). Re-signing cannot update the supplied APK in place unless you own its original signing key. For a stable signing identity configure these repository Actions secrets: `APK_KEYSTORE_BASE64` (base64 of your Java keystore), `APK_KEYSTORE_PASSWORD`, `APK_KEY_ALIAS`, `APK_KEY_PASSWORD`. Never commit a keystore or passwords. Even with a stable key, the native check may still reject the rebuild if it expects the original certificate.
 
-The supplied APK is arm64-only for its main native library. No rooted device, overlay runtime test, or original source/keystore was available in this workspace.
+The supplied APK is arm64-only for its main native library. Its injection command requires root and changes device-level settings (including SELinux enforcement); do not use it unless you understand and accept those effects. No rooted device, overlay runtime test, or original source/keystore was available in this workspace.

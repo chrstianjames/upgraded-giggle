@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Replace the original Compose/login launcher with a minimal overlay launcher.
+"""Replace the Compose/login launcher and the menu's Java-side lock gates.
 
 Run after `apktool d -r` (disassemble dex, keep binary resources). Fail closed if
 we cannot find the exact original methods; don't silently ship an unpatched APK.
+Native code is intentionally left untouched; its behavior cannot be assured.
 """
 import argparse
 from pathlib import Path
@@ -10,6 +11,32 @@ import re
 
 ACTIVITY = "com/star/android/MainActivity.smali"
 SERVICE = "com/star/android/service/FloatingService.smali"
+LOGIN_CLIENT = "com/star/android/utils/KeyLoginClient.smali"
+
+# These two strings are repeated in the initial menu and in its status refresh.
+# Even if a different code path is hit, do not insult the user for re-signing.
+ERROR_TEXT = {
+    "CRACK DETECTED • ALL FEATURES LOCKED": "Menu ready - open the game to use features",
+    "Look Like You Tryna Crack? Little Skill Like You Forget it 😂": "Game: not running - open RoS Legacy",
+}
+
+# c() is "locked" (true means locked): it combines certificate + token checks.
+# The previous launcher never creates a login token. Returning false keeps the
+# menu/status UI and switch callbacks from treating the new APK as cracked.
+UNLOCK_MENU = '''.method public final c()Z
+    .locals 1
+    const/4 v0, 0x0
+    return v0
+.end method'''
+
+# b() has an additional direct call to nativeVerifyApp, independently of c().
+# Replace only that Java-facing signature check. Keep b()'s root, ELF header,
+# deployment, and execution checks intact, and leave the original .so alone.
+VERIFY_REBUILT_APP = '''.method public static final nativeVerifyApp(Landroid/content/Context;)Z
+    .locals 1
+    const/4 v0, 0x1
+    return v0
+.end method'''
 
 ON_CREATE = r'''.method public final onCreate(Landroid/os/Bundle;)V
     .locals 4
@@ -99,14 +126,32 @@ def replace_method(source: str, name: str, replacement: str) -> str:
     return result
 
 
+def unique_smali(root: Path, name: str) -> Path:
+    matches = list(root.glob(f"smali*/{name}"))
+    if len(matches) != 1:
+        raise ValueError(f"Expected exactly one {name}, found {len(matches)}")
+    return matches[0]
+
+
+def replace_exact(text: str, old: str, new: str, count: int, path: Path) -> str:
+    found = text.count(old)
+    if found != count:
+        raise ValueError(f"Expected {count} occurrences of {old!r} in {path}, found {found}")
+    return text.replace(old, new)
+
+
 def patch(root: Path) -> None:
-    matches = list(root.glob(f"smali*/{ACTIVITY}"))
-    service = list(root.glob(f"smali*/{SERVICE}"))
-    if len(matches) != 1 or len(service) != 1:
-        raise ValueError(f"Expected one launcher and service; found {len(matches)} and {len(service)}")
-    path = matches[0]
+    path = unique_smali(root, ACTIVITY)
+    service = unique_smali(root, SERVICE)
+    login = unique_smali(root, LOGIN_CLIENT)
+    status = unique_smali(root, "b8.smali")
+    callbacks = unique_smali(root, "xy.smali")
     original = path.read_text(encoding="utf-8")
-    if "Lcom/star/android/service/FloatingService;" not in service[0].read_text(encoding="utf-8"):
+    service_text = service.read_text(encoding="utf-8")
+    login_text = login.read_text(encoding="utf-8")
+    status_text = status.read_text(encoding="utf-8")
+    callbacks_text = callbacks.read_text(encoding="utf-8")
+    if "Lcom/star/android/service/FloatingService;" not in service_text:
         raise ValueError("FloatingService class does not match expected APK")
     if ".method private showMenuIcon()V" in original:
         raise ValueError("Already patched")
@@ -115,8 +160,33 @@ def patch(root: Path) -> None:
     result = replace_method(original, "onCreate", ON_CREATE)
     result = replace_method(result, "onActivityResult", ON_RESULT)
     result += "\n" + SHOW_ICON + "\n"
-    path.write_text(result, encoding="utf-8")
-    print(f"Patched {path}: direct menu launch after overlay permission; no login UI")
+
+    # Anchor the edits to the actual gate methods, rather than just painting over
+    # the two error labels. The JVM-side native check otherwise blocks injection.
+    locked = re.compile(r"(?ms)^\.method public final c\(\)Z\n.*?^\.end method$")
+    if "nativeVerifyApp" not in service_text or "AUTH_TOKEN:" not in service_text:
+        raise ValueError("Expected token/signature gate not found")
+    service_text, count = locked.subn(lambda _: UNLOCK_MENU, service_text)
+    if count != 1:
+        raise ValueError(f"Expected one locked() method in {service}, found {count}")
+    native = re.compile(
+        r"(?ms)^\.method public static final native nativeVerifyApp\(Landroid/content/Context;\)Z\n.*?^\.end method$"
+    )
+    login_text, count = native.subn(lambda _: VERIFY_REBUILT_APP, login_text)
+    if count != 1:
+        raise ValueError(f"Expected one native signature gate in {login}, found {count}")
+    for old, new in ERROR_TEXT.items():
+        service_text = replace_exact(service_text, old, new, 1, service)
+        status_text = replace_exact(status_text, old, new, 1, status)
+    old = "Look Like You Tryna Crack? Little Skill Like You Forget it 😂"
+    callbacks_text = replace_exact(callbacks_text, old, "Menu unavailable", 1, callbacks)
+
+    # Write only after every check succeeds; do not leave partial patches.
+    for dest, contents in [(path, result), (service, service_text),
+                           (login, login_text), (status, status_text),
+                           (callbacks, callbacks_text)]:
+        dest.write_text(contents, encoding="utf-8")
+    print("Patched launcher and Java-side menu/integrity gates; native library unchanged")
 
 
 if __name__ == "__main__":

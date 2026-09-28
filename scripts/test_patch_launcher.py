@@ -13,9 +13,30 @@ class LauncherPatchTest(unittest.TestCase):
         service = self.root / 'smali/com/star/android/service'
         app.mkdir(parents=True)
         service.mkdir()
-        (service / 'FloatingService.smali').write_text(
-            '.class public Lcom/star/android/service/FloatingService;\n'
-        )
+        self.service = service / 'FloatingService.smali'
+        self.service.write_text('''.class public Lcom/star/android/service/FloatingService;
+.method public final c()Z
+    .locals 1
+    invoke-static {p0}, Lcom/star/android/utils/KeyLoginClient;->nativeVerifyApp(Landroid/content/Context;)Z
+    const-string v0, "AUTH_TOKEN:"
+    return v0
+.end method
+const-string v0, "CRACK DETECTED • ALL FEATURES LOCKED"
+const-string v0, "Look Like You Tryna Crack? Little Skill Like You Forget it 😂"
+''')
+        login = self.root / 'smali/com/star/android/utils'
+        login.mkdir()
+        self.login = login / 'KeyLoginClient.smali'
+        self.login.write_text('''.class public Lcom/star/android/utils/KeyLoginClient;
+.method public static final native nativeVerifyApp(Landroid/content/Context;)Z
+.end method
+''')
+        self.status = self.root / 'smali/b8.smali'
+        self.status.write_text('''const-string v0, "CRACK DETECTED • ALL FEATURES LOCKED"
+const-string v1, "Look Like You Tryna Crack? Little Skill Like You Forget it 😂"
+''')
+        self.callbacks = self.root / 'smali/xy.smali'
+        self.callbacks.write_text('const-string v0, "Look Like You Tryna Crack? Little Skill Like You Forget it 😂"\n')
         self.launcher = app / 'MainActivity.smali'
         self.launcher.write_text('''.class public Lcom/star/android/MainActivity;
 .super Landroidx/activity/ComponentActivity;
@@ -43,6 +64,12 @@ class LauncherPatchTest(unittest.TestCase):
         self.assertIn('showMenuIcon()', create)
         self.assertIn('startForegroundService', output)
         self.assertIn('startActivityForResult', output)
+        self.assertIn('const/4 v0, 0x0', self.service.read_text())
+        self.assertIn('const/4 v0, 0x1', self.login.read_text())
+        self.assertNotIn('native nativeVerifyApp', self.login.read_text())
+        for path in (self.service, self.status, self.callbacks):
+            self.assertNotIn('CRACK DETECTED', path.read_text())
+            self.assertNotIn('Tryna Crack', path.read_text())
         with self.assertRaisesRegex(ValueError, 'Already patched'):
             patch(self.root)
 
@@ -54,6 +81,13 @@ class LauncherPatchTest(unittest.TestCase):
     def test_fail_closed_for_duplicate_method(self):
         with self.assertRaisesRegex(ValueError, 'Expected exactly one'):
             replace_method('.method public final onCreate()V\n.end method\n' * 2, 'onCreate', '')
+
+    def test_no_partial_patch_if_signature_unknown(self):
+        before = self.launcher.read_text()
+        self.login.write_text('.class public Lcom/star/android/utils/KeyLoginClient;\n')
+        with self.assertRaisesRegex(ValueError, 'native signature gate'):
+            patch(self.root)
+        self.assertEqual(before, self.launcher.read_text())
 
 
 if __name__ == '__main__':
