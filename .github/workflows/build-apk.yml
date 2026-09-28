@@ -22,9 +22,19 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install build tools
-        run: sdkmanager 'build-tools;36.0.0'
+      - name: Locate Android SDK build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-not set}"
+          ls "${ANDROID_HOME}/build-tools" || true
+          if [[ ! -x "${ANDROID_HOME}/build-tools/36.0.0/apksigner" ]]; then
+            sdkmanager 'build-tools;36.0.0'
+          fi
+          test -x "${ANDROID_HOME}/build-tools/36.0.0/apksigner" || {
+            echo '::error::Android SDK build-tools 36.0.0 are unavailable'
+            exit 1
+          }
       - name: Get verified apktool
         shell: bash
         run: |
