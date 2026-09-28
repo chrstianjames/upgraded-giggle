@@ -16,8 +16,10 @@ LOGIN_CLIENT = "com/star/android/utils/KeyLoginClient.smali"
 # These two strings are repeated in the initial menu and in its status refresh.
 # Even if a different code path is hit, do not insult the user for re-signing.
 ERROR_TEXT = {
-    "CRACK DETECTED • ALL FEATURES LOCKED": "Menu ready - open the game to use features",
-    "Look Like You Tryna Crack? Little Skill Like You Forget it 😂": "Game: not running - open RoS Legacy",
+    # apktool may encode the bullet/emoji with smali \\u escapes, so anchor on
+    # the surrounding ASCII rather than depending on the Unicode rendering.
+    r"CRACK DETECTED[^\"\n]*ALL FEATURES LOCKED": "Menu ready - open the game to use features",
+    r"Look Like You Tryna Crack\?[^\"\n]*": "Game: not running - open RoS Legacy",
 }
 
 # c() is "locked" (true means locked): it combines certificate + token checks.
@@ -133,11 +135,13 @@ def unique_smali(root: Path, name: str) -> Path:
     return matches[0]
 
 
-def replace_exact(text: str, old: str, new: str, count: int, path: Path) -> str:
-    found = text.count(old)
+def replace_string_instruction(text: str, old: str, new: str, count: int, path: Path) -> str:
+    # Match only the body of a const-string instruction, never arbitrary code.
+    pattern = re.compile(r'(?m)^(\s*const-string(?:/jumbo)?\s+[vp]\d+,\s*)"' + old + r'"$')
+    result, found = pattern.subn(lambda match: match.group(1) + '"' + new + '"', text)
     if found != count:
         raise ValueError(f"Expected {count} occurrences of {old!r} in {path}, found {found}")
-    return text.replace(old, new)
+    return result
 
 
 def patch(root: Path) -> None:
@@ -176,10 +180,10 @@ def patch(root: Path) -> None:
     if count != 1:
         raise ValueError(f"Expected one native signature gate in {login}, found {count}")
     for old, new in ERROR_TEXT.items():
-        service_text = replace_exact(service_text, old, new, 1, service)
-        status_text = replace_exact(status_text, old, new, 1, status)
-    old = "Look Like You Tryna Crack? Little Skill Like You Forget it 😂"
-    callbacks_text = replace_exact(callbacks_text, old, "Menu unavailable", 1, callbacks)
+        service_text = replace_string_instruction(service_text, old, new, 1, service)
+        status_text = replace_string_instruction(status_text, old, new, 1, status)
+    old = r"Look Like You Tryna Crack\?[^\"\n]*"
+    callbacks_text = replace_string_instruction(callbacks_text, old, "Menu unavailable", 1, callbacks)
 
     # Write only after every check succeeds; do not leave partial patches.
     for dest, contents in [(path, result), (service, service_text),

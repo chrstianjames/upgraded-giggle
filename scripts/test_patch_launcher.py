@@ -73,6 +73,15 @@ const-string v1, "Look Like You Tryna Crack? Little Skill Like You Forget it �
         with self.assertRaisesRegex(ValueError, 'Already patched'):
             patch(self.root)
 
+    def test_unicode_escaped_smali_strings(self):
+        # apktool sometimes prints escaped Unicode rather than literal glyphs.
+        for path in (self.service, self.status, self.callbacks):
+            path.write_text(path.read_text().replace('•', r'\u2022').replace('😂', r'\ud83d\ude02'))
+        patch(self.root)
+        for path in (self.service, self.status, self.callbacks):
+            self.assertNotIn('CRACK DETECTED', path.read_text())
+            self.assertNotIn('Tryna Crack', path.read_text())
+
     def test_fail_closed_for_unknown_apk(self):
         self.launcher.write_text('.class public Lcom/star/android/MainActivity;\n')
         with self.assertRaisesRegex(ValueError, 'Unexpected original launcher'):
