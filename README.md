@@ -1,19 +1,23 @@
-# PRIMEBIT menu launcher (APK-only reconstruction)
+# PRIMEBIT APK-only launcher repair
 
-This repository was provided **only as a compiled APK**, not an Android Studio/Gradle source project. The APK package is `com.star.android` (min SDK 24, target SDK 36); its launcher shows a Compose login, while `FloatingService` creates the floating icon/menu. The original APK includes a native `libPrimeBit.so` and a repack/signature check.
+The repository contains **only a compiled APK** (package `com.star.android`), not the Android/Kotlin/C++ source. The original APK has a Compose login, a separate `FloatingService` for the overlay, and a native `libPrimeBit.so` injector. The rebuilt APK is signed with a different certificate.
 
-## Changes
+## What this build changes
 
-- Replaces the launcher activity's `onCreate` and overlay-permission result handler at APK build time. Opening the app requests **Display over other apps** permission if needed, then starts the original floating-menu foreground service and closes the launcher. **No login UI or key entry is opened.** Tap the floating icon to open the original panel.
-- The menu had a **second lock**: `FloatingService.c()` returned *true when locked* if the login token was absent or the native certificate check failed. This build replaces that Java-side lock, substitutes a Java implementation of `KeyLoginClient.nativeVerifyApp` so the separate injection gate accepts a re-signed build, and replaces the two hostile warning strings in the menu and status refresh. The original root/ELF and deployment checks remain.
-- The arm64 native library is **not** changed. Its own game-side authentication/integrity checks may still refuse injection or other features; no fabricated auth token is supplied. **A successful APK build does not prove game features work.** For a reliable full fix, use the original Android/Kotlin/C++ source and signing key and rebuild them together.
-- No new permissions are added. Android overlay permission must be approved by the user. Some devices restrict foreground services or overlays; this has not been tested on a physical device.
+- On launch, show the original app's **MainScreen with its Open Menu button**. The floating icon does **not** start automatically. Tap Open Menu to request Android's overlay permission if necessary, then start the service. The supplied APK references `MainActivity.i()` for that button but does not define it; the build supplies that method and fixes the overlay permission return path.
+- The login screen is not entered. The menu's Java-side certificate/token gate and its hostile warnings are patched, but the arm64 native library and injected `assets/Injector` are unchanged. The root, ELF-header, deployment, and socket checks are not replaced by fake “injected” results.
+
+## Why “Primebit: License Not Activated” is still possible
+
+Tracing the original dex shows that `KeyLoginClient.f()` reads `server_auth_token` from the app's `primebit_login` preferences. After injection, the app tries to send that `AUTH_TOKEN:` value to the game socket. Without one, it reads `license_key` from the same preferences and calls `KeyLoginClient.nativeGenerateAuth()` **only if the key is nonempty**. With login removed and a fresh install, both values are empty, so the native game module receives no valid activation. The reported “License Not Activated” text is not in the Java UI and was not removed by the earlier Java-side changes. **Showing the menu is not equivalent to activating the native module.** Root alone does not supply an auth token.
+
+A genuine login-free native injection fix needs the original C++ library source plus the intended license-server protocol (or an authorized guest/offline-license implementation). APK repacking cannot issue a server-approved license. Do not put signing keys, license secrets or private device identifiers in this repository or in chat. Please provide source through an appropriate private project if you want that part rebuilt; the APK alone is insufficient to verify a working injector. No rooted test device was available here, so this build is statically verified, not device-tested.
 
 ## Build
 
-[Actions → Build login-free APK](../../actions/workflows/build-apk.yml) runs automatically on source changes to this workspace branch, or can be run manually when available. Download the `primebit-menu-no-login` artifact (APK) from the workflow run, or get the latest build at [`artifacts/primebit-menu-no-login.apk`](artifacts/primebit-menu-no-login.apk). The workflow pins and verifies apktool 3.0.3, decodes the supplied APK with binary resources preserved, applies `scripts/patch_launcher.py`, rebuilds, aligns, signs, and verifies the APK. It checks the native library was not modified. The output APK is committed because the requested deliverable is a downloadable rebuilt APK; other generated files are not tracked.
+[Actions → Build menu-button APK](../../actions/workflows/build-apk.yml) runs on source changes to this branch. The latest signed output is [`artifacts/primebit-menu-button.apk`](artifacts/primebit-menu-button.apk), and the workflow run also has a download artifact. The workflow verifies apktool 3.0.3, decodes the supplied APK with binary resources preserved, patches smali, rebuilds, zipaligns, signs, verifies, and checks the native library remains byte-for-byte intact.
 
-You can also build locally with Java 17+, Android SDK build-tools 36.0.0, and apktool 3.0.3:
+For local builds use Java 17+, Android SDK build-tools 36.0.0, and apktool 3.0.3:
 
 ```bash
 java -jar apktool_3.0.3.jar d -f -r 5_6181698127930598959.apk -o decoded
@@ -23,8 +27,19 @@ zipalign -f -p 4 unsigned.apk aligned.apk
 # Sign with apksigner and YOUR keystore; apksigner verify --verbose signed.apk
 ```
 
+### Troubleshooting on a rooted phone
+
+Keep the target game `net.roslegacy.prod` running and verify the app has root access. If injection still fails, capture a log with Android platform tools after pressing **Force Inject**:
+
+```bash
+adb shell su -c 'id; pidof net.roslegacy.prod'
+adb logcat -c
+# On the phone: open the app, tap Open Menu, and tap Force Inject.
+adb logcat -d -v time | grep -Ei 'Primebit|StarShell|Anti-Patch|License|Injector|denied|socket' > injection-log.txt
+```
+
+**Redact tokens, account details, device IDs, and keys before sharing logs.** Do not run `setenforce 0` yourself; the supplied injector already contains privileged device-level commands, so use it only if you understand those effects. The main native library is arm64-only.
+
 ### Signing / installation
 
-The fallback CI key is generated anew for each build: **uninstall prior APKs before installing a fallback-signed build** (back up app data first). Re-signing cannot update the supplied APK in place unless you own its original signing key. For a stable signing identity configure these repository Actions secrets: `APK_KEYSTORE_BASE64` (base64 of your Java keystore), `APK_KEYSTORE_PASSWORD`, `APK_KEY_ALIAS`, `APK_KEY_PASSWORD`. Never commit a keystore or passwords. Even with a stable key, the native check may still reject the rebuild if it expects the original certificate.
-
-The supplied APK is arm64-only for its main native library. Its injection command requires root and changes device-level settings (including SELinux enforcement); do not use it unless you understand and accept those effects. No rooted device, overlay runtime test, or original source/keystore was available in this workspace.
+The workflow's fallback signing key changes on each build. **Back up app data and uninstall the previous APK before installing a new fallback-signed build.** To keep one signing identity configure GitHub Actions secrets `APK_KEYSTORE_BASE64` (base64 Java keystore), `APK_KEYSTORE_PASSWORD`, `APK_KEY_ALIAS`, `APK_KEY_PASSWORD`. Never commit the keystore. Even with the original signing key, the native module still needs its intended license activation path.

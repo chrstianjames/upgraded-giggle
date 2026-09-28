@@ -1,4 +1,4 @@
-name: Build login-free APK
+name: Build menu-button APK
 
 on:
   push:
@@ -96,13 +96,13 @@ jobs:
             --ks-key-alias "$APK_KEY_ALIAS" \
             --ks-pass "env:APK_KEYSTORE_PASSWORD" \
             --key-pass "env:APK_KEY_PASSWORD" \
-            --out primebit-menu-no-login.apk "$RUNNER_TEMP/aligned.apk"
+            --out primebit-menu-button.apk "$RUNNER_TEMP/aligned.apk"
           "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify \
-            --verbose --min-sdk-version 24 primebit-menu-no-login.apk
+            --verbose --min-sdk-version 24 primebit-menu-button.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: primebit-menu-no-login
-          path: primebit-menu-no-login.apk
+          name: primebit-menu-button
+          path: primebit-menu-button.apk
           if-no-files-found: error
           retention-days: 14
       - name: Publish requested APK to this branch
@@ -110,9 +110,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          cp primebit-menu-no-login.apk artifacts/primebit-menu-no-login.apk
+          cp primebit-menu-button.apk artifacts/primebit-menu-button.apk
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add artifacts/primebit-menu-no-login.apk
+          git add artifacts/primebit-menu-button.apk
           git commit -m 'Publish signed login-free APK build' || exit 0
           git push origin HEAD:arena/01a0e6da-upgraded-giggle

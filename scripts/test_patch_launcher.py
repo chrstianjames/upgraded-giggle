@@ -42,9 +42,24 @@ const-string v1, "Look Like You Tryna Crack? Little Skill Like You Forget it ðŸ˜
 .super Landroidx/activity/ComponentActivity;
 .method public final onCreate(Landroid/os/Bundle;)V
     .locals 1
+    invoke-super {p0, p1}, Landroidx/activity/ComponentActivity;->onCreate(Landroid/os/Bundle;)V
+    return-void
+.end method
+.method private static final onCreate$lambda$11(ZLcom/star/android/MainActivity;Ldm;I)Ljn1;
+    .locals 1
+    sget-object v0, Ljava/lang/Boolean;->FALSE:Ljava/lang/Boolean;
+    return-object v0
+.end method
+.method private static final onCreate$lambda$11$lambda$10$lambda$9(ZLcom/star/android/MainActivity;Ljk0;Ldm;I)Ljn1;
+    .locals 1
     invoke-static {v0}, Ljg0;->LoginScreen()V
     invoke-static {v0}, Ljg0;->MainScreen()V
-    return-void
+    return-object v0
+.end method
+.method public final h()Z
+    .locals 2
+    invoke-virtual {p0, v0, v1}, Landroidx/activity/ComponentActivity;->startActivityForResult(Landroid/content/Intent;I)V
+    return v0
 .end method
 .method public final onActivityResult(IILandroid/content/Intent;)V
     .locals 0
@@ -55,13 +70,15 @@ const-string v1, "Look Like You Tryna Crack? Little Skill Like You Forget it ðŸ˜
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_direct_menu_launch(self):
+    def test_open_menu_button_no_auto_start(self):
+        before = self.launcher.read_text().split('.method public final onCreate(', 1)[1].split('.end method', 1)[0]
         patch(self.root)
         output = self.launcher.read_text()
         create = output.split('.method public final onCreate(', 1)[1].split('.end method', 1)[0]
-        self.assertNotIn('LoginScreen', create)
-        self.assertIn('canDrawOverlays', create)
-        self.assertIn('showMenuIcon()', create)
+        self.assertEqual(create, before)  # No foreground service in onCreate.
+        self.assertIn('Ljava/lang/Boolean;->TRUE', output)
+        self.assertIn('Ljg0;->MainScreen', output)
+        self.assertIn('.method public final i()V', output)
         self.assertIn('startForegroundService', output)
         self.assertIn('startActivityForResult', output)
         self.assertIn('const/4 v0, 0x0', self.service.read_text())

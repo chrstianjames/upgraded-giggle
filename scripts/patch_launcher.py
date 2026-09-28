@@ -40,37 +40,8 @@ VERIFY_REBUILT_APP = '''.method public static final nativeVerifyApp(Landroid/con
     return v0
 .end method'''
 
-ON_CREATE = r'''.method public final onCreate(Landroid/os/Bundle;)V
-    .locals 4
-
-    invoke-super {p0, p1}, Landroidx/activity/ComponentActivity;->onCreate(Landroid/os/Bundle;)V
-
-    invoke-static {p0}, Landroid/provider/Settings;->canDrawOverlays(Landroid/content/Context;)Z
-    move-result v0
-    if-eqz v0, :request_overlay
-
-    invoke-direct {p0}, Lcom/star/android/MainActivity;->showMenuIcon()V
-    return-void
-
-    :request_overlay
-    new-instance v0, Landroid/content/Intent;
-    const-string v1, "android.settings.action.MANAGE_OVERLAY_PERMISSION"
-    new-instance v2, Ljava/lang/StringBuilder;
-    const-string v3, "package:"
-    invoke-direct {v2, v3}, Ljava/lang/StringBuilder;-><init>(Ljava/lang/String;)V
-    invoke-virtual {p0}, Landroid/content/Context;->getPackageName()Ljava/lang/String;
-    move-result-object v3
-    invoke-virtual {v2, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
-    invoke-virtual {v2}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
-    move-result-object v2
-    invoke-static {v2}, Landroid/net/Uri;->parse(Ljava/lang/String;)Landroid/net/Uri;
-    move-result-object v2
-    invoke-direct {v0, v1, v2}, Landroid/content/Intent;-><init>(Ljava/lang/String;Landroid/net/Uri;)V
-    const/16 v1, 0x7b
-    invoke-virtual {p0, v0, v1}, Landroidx/activity/ComponentActivity;->startActivityForResult(Landroid/content/Intent;I)V
-    return-void
-.end method'''
-
+# Keep the original Compose launcher: it already contains an OPEN MENU button.
+# Only change its initial screen state, not the Activity's entire onCreate body.
 ON_RESULT = r'''.method public final onActivityResult(IILandroid/content/Intent;)V
     .locals 2
 
@@ -81,22 +52,21 @@ ON_RESULT = r'''.method public final onActivityResult(IILandroid/content/Intent;
     invoke-static {p0}, Landroid/provider/Settings;->canDrawOverlays(Landroid/content/Context;)Z
     move-result v0
     if-eqz v0, :denied
-    invoke-direct {p0}, Lcom/star/android/MainActivity;->showMenuIcon()V
+    invoke-virtual {p0}, Lcom/star/android/MainActivity;->i()V
     return-void
 
     :denied
-    const-string v0, "Allow display over other apps to show the menu icon"
+    const-string v0, "Allow display over other apps, then tap Open Menu again"
     const/4 v1, 0x0
     invoke-static {p0, v0, v1}, Landroid/widget/Toast;->makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;
     move-result-object v0
     invoke-virtual {v0}, Landroid/widget/Toast;->show()V
-    invoke-virtual {p0}, Landroid/app/Activity;->finish()V
 
     :done
     return-void
 .end method'''
 
-SHOW_ICON = r'''.method private showMenuIcon()V
+SHOW_ICON = r'''.method public final i()V
     .locals 3
 
     new-instance v0, Landroid/content/Intent;
@@ -144,6 +114,22 @@ def replace_string_instruction(text: str, old: str, new: str, count: int, path: 
     return result
 
 
+def show_main_screen(source: str) -> str:
+    # Only change the remembered default of the original Compose state. The
+    # existing button calls MainActivity.i(), which the uploaded APK references
+    # but does not actually implement; see SHOW_ICON below.
+    state = re.compile(r"(?ms)^\.method private static final onCreate\$lambda\$11\([^\n]*\)Ljn1;\n.*?^\.end method$")
+    def change(match: re.Match[str]) -> str:
+        previous = "Ljava/lang/Boolean;->FALSE"
+        if match.group().count(previous) != 1:
+            raise ValueError("Expected one initial FALSE in launcher Compose state")
+        return match.group().replace(previous, "Ljava/lang/Boolean;->TRUE")
+    result, count = state.subn(change, source)
+    if count != 1:
+        raise ValueError(f"Expected one Compose launcher state, found {count}")
+    return result
+
+
 def patch(root: Path) -> None:
     path = unique_smali(root, ACTIVITY)
     service = unique_smali(root, SERVICE)
@@ -157,11 +143,11 @@ def patch(root: Path) -> None:
     callbacks_text = callbacks.read_text(encoding="utf-8")
     if "Lcom/star/android/service/FloatingService;" not in service_text:
         raise ValueError("FloatingService class does not match expected APK")
-    if ".method private showMenuIcon()V" in original:
+    if ".method public final i()V" in original:
         raise ValueError("Already patched")
     if "Ljg0;->LoginScreen" not in original or "Ljg0;->MainScreen" not in original:
         raise ValueError("Unexpected original launcher: login/main-screen signature missing")
-    result = replace_method(original, "onCreate", ON_CREATE)
+    result = show_main_screen(original)
     result = replace_method(result, "onActivityResult", ON_RESULT)
     result += "\n" + SHOW_ICON + "\n"
 
